@@ -74,6 +74,15 @@ function service_to_docker_name() {
 EXE=""
 
 function start() {
+  # 在执行restart动作的时候，由于 EXE 变量只会获取一次，
+  # 所以在前面stop的时候添加了 docker-compose-lb.yml，
+  # 若 USB_LB=0 的情况下，docker-compose-lb.yml 和 docker-compose-web-external.yml
+  # 同时去 up -d 则端口冲突
+  # 把它再删掉，避免端口冲突
+  use_lb=$(get_config USE_LB)
+  if [[ "${use_lb}" == "0" && "${EXE}" =~ "lb" ]]; then
+    EXE=$(echo -n ${EXE} | sed 's/\-f\ compose\/docker\-compose\-lb\.yml//')
+  fi
   ${EXE} up -d
 }
 
@@ -83,12 +92,22 @@ function stop() {
     return
   fi
   services=$(get_docker_compose_services ignore_db)
-  for i in ${services}; do
-    ${EXE} stop "${i}"
-  done
-  for i in ${services}; do
-    ${EXE} rm -f "${i}" >/dev/null
-  done
+  # 在配置文件中，USB_LB=0的时候，判断 jms_lb容器是否在运行。
+  # 若在运行，就将它关闭掉
+  use_lb=$(get_config USE_LB)
+  lb_container=$(docker ps -a | grep -w jms_lb)
+
+  if [[ "${use_lb}" == "0" && -n "${lb_container}" ]]; then
+    EXE+=' -f compose/docker-compose-lb.yml'
+  fi
+    # for i in ${services}; do
+    ${EXE} stop
+    # done
+    # 停止和删除容器，可以直接stop，无需用循环带服务名。
+    # 对于停止单个容器的情况，上方已有 target 变量判断
+    # for i in ${services}; do
+    ${EXE} rm -f >/dev/null
+    # done
 }
 
 function close() {
